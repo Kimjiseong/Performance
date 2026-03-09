@@ -52,10 +52,13 @@ export default function Sidebar() {
     return (
         <aside className="w-64 bg-white border-r border-slate-200 h-screen flex flex-col fixed left-0 top-0 z-40 w-[260px]">
             <div className="p-6">
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-snug">
-                    퍼포먼스플러스<br />
-                    <span className="text-blue-600 text-[15px] font-semibold mt-1 inline-block">스마트 견적 시스템</span>
-                </h1>
+                <Link href="/" className="flex items-center gap-3.5 group">
+                    <img src="/logo.png" alt="퍼포먼스플러스 로고" className="w-10 h-10 rounded-xl shadow-sm border border-slate-100 group-hover:scale-105 transition-all" />
+                    <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-snug">
+                        퍼포먼스플러스<br />
+                        <span className="text-blue-600 text-[15px] font-semibold mt-1 inline-block">스마트 견적 시스템</span>
+                    </h1>
+                </Link>
             </div>
 
             <nav className="flex-1 px-4 space-y-2.5 mt-2">
