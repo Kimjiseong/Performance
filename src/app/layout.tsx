@@ -8,7 +8,7 @@ const notoSansKr = Noto_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "교육운영 용역 견적 시스템",
+  title: "스마트 견적 시스템",
   description: "스마트한 비용 산출 및 관리 시스템",
 };
 

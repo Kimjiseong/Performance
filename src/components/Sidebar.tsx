@@ -53,7 +53,7 @@ export default function Sidebar() {
         <aside className="w-64 bg-white border-r border-slate-200 h-screen flex flex-col fixed left-0 top-0 z-40 w-[260px]">
             <div className="p-6">
                 <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-snug">
-                    제주테크노파크<br />
+                    퍼포먼스플러스<br />
                     <span className="text-blue-600 text-[15px] font-semibold mt-1 inline-block">스마트 견적 시스템</span>
                 </h1>
             </div>

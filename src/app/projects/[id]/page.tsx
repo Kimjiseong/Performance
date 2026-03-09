@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Save, Plus, Trash2, ChevronDown, CheckCircle2, History, FileDown, Loader2, Edit2, Check } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, ChevronDown, CheckCircle2, History, FileDown, Loader2, Edit2, Check, MoreVertical, Copy, GripVertical, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type EstimateItem = {
@@ -26,12 +26,42 @@ type ProjectInfo = {
     period: string;
     status: string;
     total_budget: number;
+    department?: string;
+    manager?: string;
+    contact?: string;
+    objective?: string;
+    contract_date?: string;
+    operation_details?: string;
+    recruitment_schedule?: string;
+    operation_time_place?: string;
+    goals?: string;
+    requirements?: string;
 };
 
 type EstimateVersion = {
     id: string;
     version_name: string;
     is_final: boolean;
+};
+
+const SortableHeader = ({ label, sortKey, currentSort, onSort, className = "", align = "left" }: any) => {
+    return (
+        <th 
+            className={`px-4 py-4 text-[13px] font-bold text-slate-500 cursor-pointer hover:bg-slate-100 transition-colors ${className}`}
+            onClick={() => onSort(sortKey)}
+        >
+            <div className={`flex items-center gap-1.5 ${align === "right" ? "justify-end" : "justify-start"}`}>
+                <span>{label}</span>
+                <span className="flex flex-col">
+                    {currentSort && currentSort.key === sortKey ? (
+                        currentSort.direction === 'asc' ? <ArrowUp size={14} className="text-blue-500" /> : <ArrowDown size={14} className="text-blue-500" />
+                    ) : (
+                        <ArrowUpDown size={14} className="text-slate-300 opacity-50" />
+                    )}
+                </span>
+            </div>
+        </th>
+    );
 };
 
 export default function ProjectDetail() {
@@ -47,11 +77,12 @@ export default function ProjectDetail() {
     const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false);
 
     // 모달 상태
-    const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
-    const [saveVersionName, setSaveVersionName] = useState("");
     const [isNewVersionModalOpen, setIsNewVersionModalOpen] = useState(false);
     const [newVersionName, setNewVersionName] = useState("");
     const [isDeleteVersionModalOpen, setIsDeleteVersionModalOpen] = useState(false);
+    const [isDuplicateMode, setIsDuplicateMode] = useState(false);
+    const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
 
     // 데이터베이스 상태
     const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -121,6 +152,29 @@ export default function ProjectDetail() {
     const calculateTotal = (item: EstimateItem) => item.unit_price * item.quantity * item.count;
     const grandTotal = items.reduce((sum, item) => sum + calculateTotal(item), 0);
 
+    const handleSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const sortedItems = [...items].sort((a: any, b: any) => {
+        if (!sortConfig) return 0;
+        let aValue = a[sortConfig.key];
+        let bValue = b[sortConfig.key];
+
+        if (sortConfig.key === 'total') {
+            aValue = calculateTotal(a);
+            bValue = calculateTotal(b);
+        }
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
     const vat = project?.total_budget ? Math.floor(project.total_budget / 11) : 0;
     const profit = project?.total_budget ? project.total_budget - grandTotal - vat : 0;
 
@@ -177,11 +231,10 @@ export default function ProjectDetail() {
         setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     };
 
-    // 데이터 저장 (모달에서 이름 확정 후)
+    // 데이터 저장 (이름 변경은 이미 실시간 처리되므로, 항목들만 저장)
     const executeSave = async () => {
         if (!currentVersion || !project) return;
         setIsSaving(true);
-        setIsSaveModalOpen(false); // 모달 닫기
         try {
             // 1. 프로젝트 기본 정보 업데이트
             await supabase.from('projects')
@@ -193,12 +246,7 @@ export default function ProjectDetail() {
                 })
                 .eq('id', project.id);
 
-            // 2. 버전 이름 업데이트 (모달에서 입력받은 이름으로)
-            if (saveVersionName && saveVersionName !== currentVersion.version_name) {
-                await supabase.from('estimate_versions')
-                    .update({ version_name: saveVersionName })
-                    .eq('id', currentVersion.id);
-            }
+            // 2. 버전 이름 업데이트 로직 제거 (실시간 자동 저장으로 완벽 이관됨)
 
             // 3. 견적 아이템들 저장 (Insert / Update 분리)
             const itemsToInsert: any[] = [];
@@ -233,10 +281,45 @@ export default function ProjectDetail() {
                 if (updateErr) throw updateErr;
             }
 
-            alert("저장되었습니다.");
+            alert("견적 내역이 저장되었습니다.");
             fetchProjectData();
         } catch (error: any) {
             console.error("저장 중 오류 발생", error, error.message, error.details, error.hint);
+            alert(`저장 중 오류가 발생했습니다. (${error.message || JSON.stringify(error)})`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // 기본정보 탭 전용 저장 (버전/아이템 영향 X)
+    const executeInfoSave = async () => {
+        if (!project) return;
+        setIsSaving(true);
+        try {
+            const { error: updateError } = await supabase.from('projects')
+                .update({
+                    title: project.title,
+                    client: project.client,
+                    period: project.period,
+                    total_budget: project.total_budget,
+                    department: project.department || null,
+                    manager: project.manager || null,
+                    contact: project.contact || null,
+                    objective: project.objective || null,
+                    contract_date: project.contract_date || null,
+                    operation_details: project.operation_details || null,
+                    recruitment_schedule: project.recruitment_schedule || null,
+                    operation_time_place: project.operation_time_place || null,
+                    goals: project.goals || null,
+                    requirements: project.requirements || null,
+                })
+                .eq('id', project.id);
+            if (updateError) throw updateError;
+            
+            alert("용역 기본정보가 저장되었습니다.");
+            fetchProjectData();
+        } catch (error: any) {
+            console.error("기본정보 저장 중 오류 발생", error);
             alert(`저장 중 오류가 발생했습니다. (${error.message || JSON.stringify(error)})`);
         } finally {
             setIsSaving(false);
@@ -255,30 +338,60 @@ export default function ProjectDetail() {
                 .select().single();
             if (verErr) throw verErr;
 
-            // 2. 현재 화면의 아이템들을 새 버전 ID로 묶어서 insert
-            const itemsToInsert = items.map((item, index) => ({
-                version_id: newVer.id,
-                category: item.category,
-                name: item.name,
-                unit_price: item.unit_price,
-                quantity: item.quantity,
-                count: item.count,
-                remarks: item.remarks || "",
-                order_index: index
-            }));
+            // 2. 현재 화면의 아이템들을 새 버전 ID로 묶어서 insert (복제 모드일 때만 실행)
+            if (isDuplicateMode) {
+                const itemsToInsert = items.map((item, index) => ({
+                    version_id: newVer.id,
+                    category: item.category,
+                    name: item.name,
+                    unit_price: item.unit_price,
+                    quantity: item.quantity,
+                    count: item.count,
+                    remarks: item.remarks || "",
+                    order_index: index
+                }));
 
-            if (itemsToInsert.length > 0) {
-                const { error: itemErr } = await supabase.from('estimate_items').insert(itemsToInsert);
-                if (itemErr) throw itemErr;
+                if (itemsToInsert.length > 0) {
+                    const { error: itemErr } = await supabase.from('estimate_items').insert(itemsToInsert);
+                    if (itemErr) throw itemErr;
+                }
             }
 
-            alert("새 견적 버전이 생성되었습니다.");
+            alert(isDuplicateMode ? "견적 버전이 복제되었습니다." : "빈 견적 버전이 새로 생성되었습니다.");
             fetchProjectData();
         } catch (error: any) {
             console.error("새 버전 생성 오류", error, error.message, error.details);
             alert(`새 버전 생성에 실패했습니다. (${error.message || JSON.stringify(error)})`);
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    // 버전 이름만 분리하여 즉시 자동 저장
+    const handleVersionNameUpdate = async (newName: string) => {
+        if (!currentVersion || !newName.trim() || newName === currentVersion.version_name) {
+            setEditingVersionName(currentVersion?.version_name || ""); // 원래 이름으로 롤백
+            setIsEditingVersion(false);
+            return;
+        }
+
+        try {
+            const { error } = await supabase.from('estimate_versions')
+                .update({ version_name: newName })
+                .eq('id', currentVersion.id);
+
+            if (error) throw error;
+
+            // 로컬 상태 즉시 갱신
+            const updatedVersion = { ...currentVersion, version_name: newName };
+            setCurrentVersion(updatedVersion);
+            setVersions(versions.map(v => v.id === currentVersion.id ? updatedVersion : v));
+        } catch (error: any) {
+            console.error("버전명 업데이트 실패", error);
+            alert("이름 저장에 실패했습니다.");
+            setEditingVersionName(currentVersion.version_name); // 실패 시 롤백
+        } finally {
+            setIsEditingVersion(false);
         }
     };
 
@@ -365,82 +478,124 @@ export default function ProjectDetail() {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="relative z-20">
-                        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl transition-colors">
-                            <History size={16} className="text-slate-400" />
-                            {isEditingVersion ? (
-                                <div className="flex items-center gap-1">
-                                    <input
-                                        type="text"
-                                        value={editingVersionName}
-                                        onChange={(e) => setEditingVersionName(e.target.value)}
-                                        className="text-sm font-semibold text-slate-700 bg-white border border-blue-200 rounded px-2 py-0.5 outline-none focus:ring-2 focus:ring-blue-100"
-                                        autoFocus
-                                        onBlur={() => setIsEditingVersion(false)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') setIsEditingVersion(false);
-                                        }}
-                                    />
-                                    <button className="text-blue-500 hover:text-blue-700 p-0.5" onClick={() => setIsEditingVersion(false)}>
-                                        <Check size={14} />
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-2 cursor-pointer group" onClick={() => setIsEditingVersion(true)}>
-                                    <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 transition-colors">
-                                        {editingVersionName || currentVersion?.version_name || '버전 없음'}
+                <div className="flex items-center gap-3">
+                    {/* 버전별 기능은 '비용 산출 (견적)' 탭에서만 활성화 */}
+                    {activeTab === 'estimate' && (
+                        <>
+                            <div className="relative z-20">
+                                <div 
+                                    className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl transition-colors cursor-pointer hover:bg-slate-100" 
+                                    onClick={() => {
+                                        setIsVersionDropdownOpen(!isVersionDropdownOpen);
+                                        setIsMoreMenuOpen(false);
+                                    }}
+                                >
+                                    <History size={16} className="text-slate-400" />
+                                    <span className="text-sm font-semibold text-slate-700">
+                                        기존 버전 불러오기
                                     </span>
-                                    <Edit2 size={12} className="text-slate-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all" />
+                                    <ChevronDown
+                                        size={14}
+                                        className={`ml-1 text-slate-400 transition-transform ${isVersionDropdownOpen ? 'rotate-180' : ''}`}
+                                    />
                                 </div>
-                            )}
-                            <ChevronDown
-                                size={14}
-                                className={`ml-1 text-slate-400 cursor-pointer transition-transform ${isVersionDropdownOpen ? 'rotate-180' : ''}`}
-                                onClick={() => setIsVersionDropdownOpen(!isVersionDropdownOpen)}
-                            />
-                        </div>
-                        {/* 버전 드롭다운 메뉴 */}
-                        {isVersionDropdownOpen && (
-                            <div className="absolute top-full right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 overflow-hidden">
-                                <div className="px-3 pb-2 pt-1 border-b border-slate-100 mb-1">
-                                    <p className="text-xs font-semibold text-slate-500">저장된 버전 내역</p>
-                                </div>
-                                <div className="max-h-60 overflow-y-auto">
-                                    {versions.length > 0 ? versions.map(v => (
-                                        <button
-                                            key={v.id}
-                                            onClick={() => handleVersionSelect(v)}
-                                            className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${currentVersion?.id === v.id ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <span>{v.version_name}</span>
-                                                {currentVersion?.id === v.id && <Check size={14} className="text-blue-500" />}
-                                            </div>
-                                        </button>
-                                    )) : (
-                                        <div className="px-4 py-3 text-sm text-slate-500 text-center">버전 없음</div>
-                                    )}
-                                </div>
+                                {/* 버전 드롭다운 메뉴 */}
+                                {isVersionDropdownOpen && (
+                                    <div className="absolute top-full right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 overflow-hidden">
+                                        <div className="px-3 pb-2 pt-1 border-b border-slate-100 mb-1">
+                                            <p className="text-xs font-semibold text-slate-500">저장된 버전 내역</p>
+                                        </div>
+                                        <div className="max-h-60 overflow-y-auto">
+                                            {versions.length > 0 ? versions.map(v => (
+                                                <button
+                                                    key={v.id}
+                                                    onClick={() => handleVersionSelect(v)}
+                                                    className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors ${currentVersion?.id === v.id ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span>{v.version_name}</span>
+                                                        {currentVersion?.id === v.id && <Check size={14} className="text-blue-500" />}
+                                                    </div>
+                                                </button>
+                                            )) : (
+                                                <div className="px-4 py-3 text-sm text-slate-500 text-center">버전 없음</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                    <button onClick={() => { setNewVersionName(`${currentVersion?.version_name || '견적'} 복사본`); setIsNewVersionModalOpen(true); }} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
-                        <Plus size={18} />
-                        새 버전
-                    </button>
-                    <button onClick={() => setIsDeleteVersionModalOpen(true)} className="bg-white border border-red-100 hover:bg-red-50 text-red-500 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm" disabled={versions.length <= 1}>
-                        <Trash2 size={18} />
-                        버전 삭제
-                    </button>
-                    <button onClick={() => { setSaveVersionName(currentVersion?.version_name || ""); setIsSaveModalOpen(true); }} disabled={isSaving} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm disabled:bg-slate-600">
+                        </>
+                    )}
+
+                    {/* PDF 출력 기능 (미완성으로 임시 숨김 처리)
+                    {activeTab === 'estimate' && (
+                        <button onClick={handlePrint} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
+                            <FileDown size={18} />
+                            PDF 출력
+                        </button>
+                    )}
+                    */}
+
+                    {/* 공통 동작 (탭별 분기 저장) */}
+                    <button 
+                        onClick={() => { 
+                            if (activeTab === 'info') {
+                                executeInfoSave();
+                            } else {
+                                executeSave(); 
+                            }
+                        }} 
+                        disabled={isSaving} 
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm disabled:bg-blue-400"
+                    >
                         {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                         저장
                     </button>
-                    <button onClick={handlePrint} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
-                        <FileDown size={18} />
-                        PDF 출력
-                    </button>
+
+                    {/* 더보기(Kebab) 메뉴 - estimate 탭에서만 활성화 */}
+                    {activeTab === 'estimate' && (
+                        <div className="relative z-20">
+                            <button 
+                                onClick={() => {
+                                    setIsMoreMenuOpen(!isMoreMenuOpen);
+                                    setIsVersionDropdownOpen(false);
+                                }} 
+                                className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 p-2.5 rounded-xl transition-colors shadow-sm"
+                            >
+                                <MoreVertical size={18} />
+                            </button>
+                            
+                            {isMoreMenuOpen && (
+                                <div className="absolute top-full right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 overflow-hidden">
+                                    <div className="px-3 pb-2 pt-1 border-b border-slate-100 mb-1">
+                                        <p className="text-xs font-semibold text-slate-500">버전 관련 추가 옵션</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => { setIsDuplicateMode(false); setNewVersionName("새 빈 견적서"); setIsNewVersionModalOpen(true); setIsMoreMenuOpen(false); }} 
+                                        className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                    >
+                                        <Plus size={16} className="text-blue-500" /> 신규 버전 생성
+                                    </button>
+                                    <button 
+                                        onClick={() => { setIsDuplicateMode(true); setNewVersionName(`${currentVersion?.version_name || '견적'} 복사본`); setIsNewVersionModalOpen(true); setIsMoreMenuOpen(false); }} 
+                                        className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                    >
+                                        <Copy size={16} className="text-emerald-500" /> 현재 버전 복제
+                                    </button>
+                                    <div className="h-px bg-slate-100 my-1"></div>
+                                    <button 
+                                        onClick={() => { setIsDeleteVersionModalOpen(true); setIsMoreMenuOpen(false); }} 
+                                        disabled={versions.length <= 1}
+                                        className="w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-2.5 disabled:text-red-300 disabled:hover:bg-transparent transition-colors"
+                                    >
+                                        <Trash2 size={16} /> 현재 버전 삭제
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+
                 </div>
             </header>
 
@@ -528,19 +683,43 @@ export default function ProjectDetail() {
                             <div className="grid grid-cols-2 gap-5">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">기관명</label>
-                                    <input type="text" placeholder="예: 재단법인 제주테크노파크" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 재단법인 제주테크노파크" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.client || ""}
+                                        onChange={(e) => setProject({ ...project, client: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">부서명</label>
-                                    <input type="text" placeholder="예: 미래융합사업본부" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 미래융합사업본부" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.department || ""}
+                                        onChange={(e) => setProject({ ...project, department: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">담당자 (직위)</label>
-                                    <input type="text" placeholder="예: 홍길동 선임연구원" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 홍길동 선임연구원" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.manager || ""}
+                                        onChange={(e) => setProject({ ...project, manager: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">연락처</label>
-                                    <input type="text" placeholder="예: 064-123-4567 / email@example.com" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 064-123-4567 / email@example.com" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.contact || ""}
+                                        onChange={(e) => setProject({ ...project, contact: e.target.value })}
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -551,11 +730,22 @@ export default function ProjectDetail() {
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">과업 목적</label>
-                                    <textarea rows={2} placeholder="과업 목적 및 배경 입력" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20"></textarea>
+                                    <textarea 
+                                        rows={2} 
+                                        placeholder="과업 목적 및 배경 입력" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                                        value={project.objective || ""}
+                                        onChange={(e) => setProject({ ...project, objective: e.target.value })}
+                                    ></textarea>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">계약일</label>
-                                    <input type="date" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 text-slate-700" />
+                                    <input 
+                                        type="date" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 text-slate-700" 
+                                        value={project.contract_date || ""}
+                                        onChange={(e) => setProject({ ...project, contract_date: e.target.value })}
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -566,15 +756,33 @@ export default function ProjectDetail() {
                             <div className="grid grid-cols-2 gap-5">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">운영 과정 및 모집 인원</label>
-                                    <input type="text" placeholder="예: 2개 과정, 각 20명 선발" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 2개 과정, 각 20명 선발" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.operation_details || ""}
+                                        onChange={(e) => setProject({ ...project, operation_details: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">모집 일정</label>
-                                    <input type="text" placeholder="예: 2025.11.17 ~ 11.27" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 2025.11.17 ~ 11.27" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.recruitment_schedule || ""}
+                                        onChange={(e) => setProject({ ...project, recruitment_schedule: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">운영 시간 및 장소</label>
-                                    <input type="text" placeholder="예: JTP 전산강의실 (10-17시)" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: JTP 전산강의실 (10-17시)" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.operation_time_place || ""}
+                                        onChange={(e) => setProject({ ...project, operation_time_place: e.target.value })}
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -585,11 +793,23 @@ export default function ProjectDetail() {
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">사업 목표치 확인 / 교육과정</label>
-                                    <input type="text" placeholder="예: 주요 목표치 등재" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 주요 목표치 등재" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20" 
+                                        value={project.goals || ""}
+                                        onChange={(e) => setProject({ ...project, goals: e.target.value })}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">강사 섭외 및 결과물 제출 규격</label>
-                                    <textarea rows={2} placeholder="예: 교육결과보고서, 출석부 제출" className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20"></textarea>
+                                    <textarea 
+                                        rows={2} 
+                                        placeholder="예: 교육결과보고서, 출석부 제출" 
+                                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                                        value={project.requirements || ""}
+                                        onChange={(e) => setProject({ ...project, requirements: e.target.value })}
+                                    ></textarea>
                                 </div>
                             </div>
                         </div>
@@ -601,7 +821,41 @@ export default function ProjectDetail() {
                 )}
 
                 {activeTab === "estimate" && (
-                    <div className="max-w-6xl mx-auto space-y-6">
+                    <div className="max-w-[1400px] mx-auto space-y-6">
+                        
+                        {/* 버전명 텍스트 에디터 (구글 문서 스타일) */}
+                        <div className="flex px-2 pt-2 mb-2">
+                            {currentVersion && (
+                                <div className="group relative flex items-center max-w-lg w-full">
+                                    <input
+                                        type="text"
+                                        value={isEditingVersion ? editingVersionName : (currentVersion.version_name || "")}
+                                        onChange={(e) => setEditingVersionName(e.target.value)}
+                                        onFocus={() => {
+                                            setEditingVersionName(currentVersion.version_name);
+                                            setIsEditingVersion(true);
+                                        }}
+                                        onBlur={(e) => handleVersionNameUpdate(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.currentTarget.blur(); // focus 해제하며 자동 저장 유도
+                                            }
+                                        }}
+                                        className={`w-full text-left text-2xl font-extrabold text-slate-800 bg-transparent border-b-2 outline-none transition-all py-1.5 focus:border-blue-500 focus:bg-white focus:px-4 focus:shadow-sm focus:rounded-t-lg rounded-b-none
+                                            ${isEditingVersion ? 'border-blue-500 bg-white px-4' : 'border-transparent hover:border-slate-300 pr-8'}
+                                        `}
+                                        title="클릭하여 견적 버전을 변경하세요"
+                                        placeholder="견적 버전 이름을 입력하세요"
+                                    />
+                                    {!isEditingVersion && (
+                                        <div className="absolute right-2 text-slate-300 group-hover:text-slate-500 transition-colors pointer-events-none">
+                                            <Edit2 size={18} />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
                         {/* 금액 요약 카드 */}
                         <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg shadow-blue-600/20 flex flex-col md:flex-row justify-between items-center gap-6">
                             <div className="flex w-full md:w-auto gap-4 md:gap-8 items-center border-b md:border-b-0 border-white/20 pb-4 md:pb-0">
@@ -640,19 +894,41 @@ export default function ProjectDetail() {
                             <table className="w-full text-left">
                                 <thead>
                                     <tr className="bg-slate-50 border-b border-slate-200">
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-32">구분</th>
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 min-w-[200px]">내역</th>
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-40 text-right">단가(원)</th>
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-24 text-right">수량</th>
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-24 text-right">인원/횟수</th>
-                                        <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-36 text-right">공급가액</th>
+                                        <th className="px-2 py-4 w-10 text-center text-slate-400"><GripVertical size={14} className="mx-auto opacity-50" /></th>
+                                        <SortableHeader label="구분" sortKey="category" currentSort={sortConfig} onSort={handleSort} className="w-48" />
+                                        <SortableHeader label="내역" sortKey="name" currentSort={sortConfig} onSort={handleSort} className="min-w-[200px]" />
+                                        <SortableHeader label="단가(원)" sortKey="unit_price" currentSort={sortConfig} onSort={handleSort} className="w-40 text-right" align="right" />
+                                        <SortableHeader label="수량" sortKey="quantity" currentSort={sortConfig} onSort={handleSort} className="w-24 text-right" align="right" />
+                                        <SortableHeader label="인원/횟수" sortKey="count" currentSort={sortConfig} onSort={handleSort} className="w-24 text-right" align="right" />
+                                        <SortableHeader label="공급가액" sortKey="total" currentSort={sortConfig} onSort={handleSort} className="w-36 text-right" align="right" />
                                         <th className="px-4 py-4 text-[13px] font-bold text-slate-500 w-40">비고</th>
                                         <th className="px-2 py-4 w-12"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {items.map((item) => (
-                                        <tr key={item.id} className="hover:bg-blue-50/30 transition-colors group">
+                                    {sortedItems.map((item, index) => (
+                                        <tr 
+                                            key={item.id} 
+                                            draggable
+                                            onDragStart={(e) => {
+                                                e.dataTransfer.effectAllowed = 'move';
+                                                e.dataTransfer.setData('text/plain', index.toString());
+                                            }}
+                                            onDragOver={(e) => e.preventDefault()}
+                                            onDrop={(e) => {
+                                                e.preventDefault();
+                                                const dragIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                                                if (isNaN(dragIndex) || dragIndex === index) return;
+                                                const newItems = [...items];
+                                                const [dragItem] = newItems.splice(dragIndex, 1);
+                                                newItems.splice(index, 0, dragItem);
+                                                setItems(newItems.map((itm, idx) => ({ ...itm, order_index: idx })));
+                                            }}
+                                            className="hover:bg-blue-50/30 transition-colors group"
+                                        >
+                                            <td className="px-2 py-3 text-center cursor-grab active:cursor-grabbing" title="드래그하여 순서 변경">
+                                                <GripVertical size={16} className="mx-auto text-slate-300 hover:text-slate-500 transition-colors" />
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <select
                                                     className="w-full bg-transparent border border-transparent hover:border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg px-2 py-2 text-sm font-medium text-slate-700 outline-none transition-all"
@@ -718,7 +994,7 @@ export default function ProjectDetail() {
                                             <td className="px-3 py-3 text-center">
                                                 <button
                                                     onClick={() => removeItem(item.id, item.isNew)}
-                                                    className="text-slate-400 hover:text-red-500 transition-colors p-1.5 rounded hover:bg-red-50 opacity-40 group-hover:opacity-100 focus:opacity-100"
+                                                    className="text-red-400 hover:text-red-600 transition-colors p-1.5 rounded hover:bg-red-50 opacity-60 group-hover:opacity-100 focus:opacity-100"
                                                     title="항목 삭제"
                                                 >
                                                     <Trash2 size={16} />
@@ -764,34 +1040,6 @@ export default function ProjectDetail() {
                     </div>
                 )}
             </div>
-
-            {/* 저장 시 버전 이름 확인 모달 */}
-            {isSaveModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-white rounded-2xl p-6 w-[400px] shadow-2xl border border-slate-100">
-                        <h3 className="text-lg font-bold text-slate-800 mb-2">저장 옵션</h3>
-                        <p className="text-sm text-slate-500 mb-4">현재 저장 중인 견적 버전의 이름을 확인하거나 변경하세요.</p>
-                        <div className="mb-6">
-                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">버전 이름</label>
-                            <input
-                                type="text"
-                                value={saveVersionName}
-                                onChange={(e) => setSaveVersionName(e.target.value)}
-                                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 bg-slate-50 text-sm font-semibold focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 text-slate-900"
-                                placeholder="예: v1.0 기초견적"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="flex justify-end gap-3">
-                            <button onClick={() => setIsSaveModalOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors">취소</button>
-                            <button onClick={executeSave} disabled={isSaving} className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-md flex items-center gap-2">
-                                {isSaving && <Loader2 size={16} className="animate-spin" />}
-                                저장하기
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* 새 견적(버전) 생성 모달 */}
             {isNewVersionModalOpen && (
