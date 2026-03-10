@@ -9,21 +9,24 @@ import { supabase } from "@/lib/supabase";
 export default function Sidebar() {
     const router = useRouter();
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [newProject, setNewProject] = useState({ title: "", client: "" });
+    const [newProject, setNewProject] = useState({ title: "", total_budget: "" });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleCreateProject = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newProject.title || !newProject.client) {
-            alert("프로젝트명과 발주처를 입력해주세요.");
+        if (!newProject.title || !newProject.total_budget) {
+            alert("프로젝트명과 총예산을 입력해주세요.");
             return;
         }
+
+        const budgetValue = Number(newProject.total_budget.replace(/,/g, ''));
+
         setIsSubmitting(true);
         try {
             // 1. 새 프로젝트 생성
             const { data: projectData, error: projectError } = await supabase
                 .from('projects')
-                .insert([{ title: newProject.title, client: newProject.client }])
+                .insert([{ title: newProject.title, total_budget: budgetValue }])
                 .select()
                 .single();
 
@@ -39,7 +42,7 @@ export default function Sidebar() {
             if (versionError) throw versionError;
 
             setIsModalOpen(false);
-            setNewProject({ title: "", client: "" });
+            setNewProject({ title: "", total_budget: "" });
             // 생성된 프로젝트 상세(비용 산출) 페이지로 이동
             router.push(`/projects/${projectData.id}`);
         } catch (error) {
@@ -98,7 +101,7 @@ export default function Sidebar() {
                         </div>
                         <form onSubmit={handleCreateProject} className="space-y-5">
                             <div>
-                                <label className="block text-sm font-semibold text-slate-700 mb-2">프젝트명 (용역명)</label>
+                                <label className="block text-sm font-semibold text-slate-700 mb-2">프로젝트명 (용역명)</label>
                                 <input
                                     type="text"
                                     required
@@ -109,14 +112,18 @@ export default function Sidebar() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold text-slate-700 mb-2">발주처</label>
+                                <label className="block text-sm font-semibold text-slate-700 mb-2">총예산 (원)</label>
                                 <input
                                     type="text"
                                     required
-                                    value={newProject.client}
-                                    onChange={(e) => setNewProject({ ...newProject, client: e.target.value })}
-                                    className="w-full border border-slate-200 rounded-xl px-4 py-3 bg-slate-50 hover:bg-white focus:bg-white text-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-slate-900 placeholder:text-slate-400"
-                                    placeholder="예) 제주특별자치도"
+                                    value={newProject.total_budget}
+                                    onChange={(e) => {
+                                        const val = e.target.value.replace(/[^0-9]/g, '');
+                                        const formatted = val ? new Intl.NumberFormat('ko-KR').format(Number(val)) : '';
+                                        setNewProject({ ...newProject, total_budget: formatted });
+                                    }}
+                                    className="w-full border border-slate-200 rounded-xl px-4 py-3 bg-slate-50 hover:bg-white focus:bg-white text-sm text-right font-semibold focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all text-slate-900 placeholder:text-slate-400"
+                                    placeholder="예) 50,000,000"
                                 />
                             </div>
                             <div className="pt-2">
